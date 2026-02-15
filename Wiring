@@ -1,0 +1,698 @@
+# 🔌 Wiring Guide - Weather Station
+
+Complete wiring diagrams and connection guides for your Raspberry Pi Pico W weather station.
+
+## 📋 Table of Contents
+
+- [Quick Reference](#quick-reference)
+- [Pin Assignments](#pin-assignments)
+- [Section 1: BME280 Sensor](#section-1-bme280-sensor-wiring)
+- [Section 2: Power System](#section-2-power-system)
+- [Section 3: Status LED](#section-3-optional-status-led)
+- [Section 4: Minimal Setup](#section-4-complete-minimal-system)
+- [Section 5: Solar System](#section-5-complete-solar-powered-system)
+- [Physical Layout](#physical-layout-recommendations)
+- [Testing Checklist](#testing-checklist)
+- [Common Mistakes](#common-wiring-mistakes)
+
+## 🎯 Quick Reference
+
+### Complete System Diagram
+
+```
+                        RASPBERRY PI PICO W
+                    ┌─────────────────────────┐
+                    │                         │
+     BME280         │  GP0  ◄── SDA          │
+       │            │  GP1  ◄── SCL          │
+       │            │                         │
+       │            │  3.3V ◄── Power        │
+       │            │  GND  ◄── Ground       │
+       │            │                         │
+       │            │  GP27 ◄── Battery ADC  │  ◄── Voltage Divider
+       │            │                         │
+       │            │  GP28 ◄── Status LED   │  ──► LED + 220Ω
+       │            │                         │
+       │            │  VSYS ◄── Power In     │  ◄── From Regulator
+       │            │  GND  ◄── Ground       │
+                    └─────────────────────────┘
+```
+
+## 📍 Pin Assignments
+
+| GPIO Pin | Function | Connection | Notes |
+|----------|----------|------------|-------|
+| **GP0** | I2C SDA | BME280 SDA | Data line |
+| **GP1** | I2C SCL | BME280 SCL | Clock line |
+| **GP27** (ADC1) | Battery Monitor | Voltage Divider | Optional |
+| **GP28** | Status LED | LED + Resistor | Optional |
+| **3.3V** (Pin 36) | Power Out | BME280 VCC | Sensor power |
+| **GND** (Pin 38) | Ground | Common Ground | All GNDs connect |
+| **VSYS** (Pin 39) | Power In | 5V Regulator | Main power input |
+
+## 📡 Section 1: BME280 Sensor Wiring
+
+### Simple Connection Diagram
+
+```
+     BME280 Breakout Board              Raspberry Pi Pico W
+    ┌─────────────────┐                ┌─────────────────┐
+    │                 │                │                 │
+    │  VCC  ●─────────┼────────────────┼──● Pin 36 (3.3V)│
+    │                 │   RED          │                 │
+    │  GND  ●─────────┼────────────────┼──● Pin 38 (GND) │
+    │                 │   BLACK        │                 │
+    │  SDA  ●─────────┼────────────────┼──● Pin 1  (GP0) │
+    │                 │   BLUE         │                 │
+    │  SCL  ●─────────┼────────────────┼──● Pin 2  (GP1) │
+    │                 │   YELLOW       │                 │
+    └─────────────────┘                └─────────────────┘
+```
+
+### Wire Specifications
+
+**Recommended Wire Colors:**
+| Wire | Color | Purpose |
+|------|-------|---------|
+| VCC  | 🔴 Red | Positive 3.3V power |
+| GND  | ⚫ Black | Ground |
+| SDA  | 🔵 Blue | I2C Data |
+| SCL  | 🟡 Yellow | I2C Clock |
+
+**Wire Gauge:** 24-28 AWG (0.2-0.5mm²)
+**Maximum Length:** 1 meter (longer may need pull-up resistors)
+
+### I2C Pull-up Resistors
+
+Most BME280 breakout boards have **built-in pull-up resistors** (typically 4.7kΩ or 10kΩ).
+
+**If your board doesn't have pull-ups, add them:**
+```
+3.3V ──┬── 4.7kΩ ──┬── SDA (GP0)
+       │           │
+       └── 4.7kΩ ──┴── SCL (GP1)
+```
+
+### I2C Address
+
+BME280 can have two addresses:
+- **0x76** (Default - SDO pin to GND)
+- **0x77** (Alternate - SDO pin to VCC)
+
+**Check your address:**
+```python
+from machine import I2C, Pin
+i2c = I2C(0, sda=Pin(0), scl=Pin(1))
+print(hex(i2c.scan()[0]))  # Will show 0x76 or 0x77
+```
+
+Update `config.py` if needed:
+```python
+BME280_I2C_ADDR = 0x76  # or 0x77
+```
+
+## 🔋 Section 2: Power System
+
+### Overview
+
+```
+☀️ Solar Panel → 🔌 Charge Controller → 🔋 Battery → 📊 Regulator → 💻 Pico W
+```
+
+### 2A: Solar Charging Circuit
+
+```
+                                    ┌─────────────────┐
+    ☀️ Solar Panel                  │   TP4056 Module │
+    6V, 5-10W                       │                 │
+         │                          │   B+  ●  ● B-   │
+         │                          │    │      │     │
+         └──────► + ●───►IN+ ●──────┤    │      │     │
+                           │        │   ┌┴──────┴┐    │
+              GND ◄────IN- ●        │   │ Battery │    │
+                           │        │   │ 3.7V    │    │
+                      OUT+ ●────────┤   │ Li-ion  │    │
+                           │        │   └─────────┘    │
+                      OUT- ●────┐   │                 │
+                                │   └─────────────────┘
+                                │
+                                │   ┌─────────────────┐
+                                │   │  Voltage Reg    │
+                                │   │  (Buck/Boost)   │
+                                │   │   3.3V → 5V     │
+                                └──►IN-              │
+                                    │                 │
+                             5V ◄──OUT+              │
+                            GND ◄──OUT-              │
+                                    │                 │
+                                    └─────────────────┘
+                                         │      │
+                                         │      │
+                                    ┌────┼──────┼────┐
+                                    │    ▼      ▼    │
+                                    │  VSYS    GND   │
+                                    │  Pin39   Pin38 │
+                                    │                │
+                                    │  Pico W        │
+                                    └────────────────┘
+```
+
+### 2B: Component Specifications
+
+| Component | Specification | Example Part | Notes |
+|-----------|---------------|--------------|-------|
+| Solar Panel | 5-10W, 6V | Generic 6V 10W panel | Higher wattage for winter/cloudy |
+| Battery | 3.7V Li-ion, 3000-5000mAh | 18650 cell (3000mAh) | Protected cell recommended |
+| Charge Controller | TP4056 with protection | TP4056 + DW01A module | Must have load sharing |
+| Voltage Regulator | 3-5V in, 5V out, 500mA+ | Pololu U3V12F5 | Buck-boost for stable output |
+
+### 2C: Battery Voltage Monitoring
+
+```
+    Battery +                           Pico W
+       │                          ┌─────────────────┐
+       │                          │                 │
+       ├────── R1 (10kΩ) ─────┬───┼──● GP27 (ADC1) │
+       │                      │   │     Pin 32     │
+       │                      │   │                 │
+    Battery -              R2 (10kΩ) │                 │
+       │                      │   │                 │
+       └──────────────────────┴───┼──● GND         │
+                                  │     Pin 33     │
+                                  └─────────────────┘
+
+Voltage Divider Formula:
+    V_adc = V_battery × (R2 / (R1 + R2))
+    V_adc = V_battery × (10k / 20k)
+    V_adc = V_battery / 2
+    
+    Therefore:
+    V_battery = V_adc × 2
+```
+
+**Component Details:**
+- **R1 & R2:** 10kΩ, 1% tolerance (brown-black-orange-brown-brown)
+- **Purpose:** Divides battery voltage (4.2V max) to safe ADC range (0-3.3V)
+- **Power consumption:** ~0.2mA (negligible)
+
+**Reading Battery Voltage in Code:**
+```python
+from machine import ADC, Pin
+
+adc = ADC(Pin(27))
+raw_value = adc.read_u16()  # 0-65535
+voltage = (raw_value / 65535) * 3.3 * 2  # × 2 for voltage divider
+print(f"Battery: {voltage:.2f}V")
+```
+
+### 2D: Power System Wiring Steps
+
+1. **Solar Panel → Charge Controller**
+   ```
+   Solar (+) → TP4056 IN+
+   Solar (-) → TP4056 IN-
+   ```
+
+2. **Battery → Charge Controller**
+   ```
+   Battery (+) → TP4056 B+
+   Battery (-) → TP4056 B-
+   ```
+
+3. **Charge Controller → Voltage Regulator**
+   ```
+   TP4056 OUT+ → Regulator VIN
+   TP4056 OUT- → Regulator GND
+   ```
+
+4. **Voltage Regulator → Pico**
+   ```
+   Regulator VOUT (5V) → Pico VSYS (Pin 39)
+   Regulator GND       → Pico GND (Pin 38)
+   ```
+
+5. **Battery Monitor → Pico**
+   ```
+   Battery (+) → 10kΩ → GP27 (Pin 32) → 10kΩ → GND
+   ```
+
+## 💡 Section 3: Optional Status LED
+
+### Simple LED Circuit
+
+```
+    Pico W GP28 ───► 220Ω ───► LED (+) ───► LED (-) ───► GND
+    Pin 34          Resistor    Anode        Cathode      Pin 33
+```
+
+### Visual Diagram
+
+```
+    ┌─────────────────────────────────────────┐
+    │         Raspberry Pi Pico W             │
+    │                                         │
+    │  GP28 (Pin 34) ─────┐                  │
+    │                     │                  │
+    │  GND (Pin 33) ──────┼──┐               │
+    └─────────────────────┼──┼───────────────┘
+                         │  │
+                         ▼  │
+                      ┌─────┐│
+                      │ 220Ω││
+                      │  R  ││
+                      └─────┘│
+                         │  │
+                         ▼  │
+                      ┌─────┐│
+                      │ LED ││  (Anode to cathode)
+                      └─────┘│
+                         │  │
+                         └──┘
+```
+
+### LED Specifications
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| LED Type | Any standard LED | Red, Green, Blue, etc. |
+| Forward Voltage | 2.0-3.3V | Typical for standard LEDs |
+| Current | 10-15mA | Limited by resistor |
+| Resistor | 220Ω - 470Ω | 220Ω = ~13mA, 470Ω = ~6mA |
+| Power | ~30-50mW | Negligible impact |
+
+**LED Polarity (Important!):**
+```
+    LED Symbol:     ──►|──
+                      │ │
+                    Anode Cathode
+                    Long  Short
+                    (+)   (-)
+```
+
+**Resistor Calculation:**
+```
+R = (V_gpio - V_led) / I_desired
+R = (3.3V - 2.0V) / 0.012A
+R = 108Ω  (use 220Ω standard value)
+```
+
+## 🔧 Section 4: Complete Minimal System
+
+Perfect for getting started - just BME280 + USB power!
+
+```
+    ┌─────────────────────────────────────────────────┐
+    │                                                 │
+    │               RASPBERRY PI PICO W               │
+    │                                                 │
+    │  Pin 1  GP0  ◄───────── SDA ──── BME280        │
+    │  Pin 2  GP1  ◄───────── SCL ──── BME280        │
+    │                                                 │
+    │  Pin 36 3.3V ◄───────── VCC ──── BME280        │
+    │  Pin 38 GND  ◄───────── GND ──── BME280        │
+    │                                                 │
+    │  USB Port ◄──────── USB Cable ◄─── Computer    │
+    │                     (Power + Programming)       │
+    │                                                 │
+    └─────────────────────────────────────────────────┘
+```
+
+### Minimal Setup Features
+
+**What you get:**
+- ✅ Temperature, humidity, pressure readings
+- ✅ WiFi connectivity and cloud upload
+- ✅ All core functionality
+- ✅ Easy to build and test
+
+**What you don't get:**
+- ❌ Battery backup
+- ❌ Solar charging
+- ❌ Battery monitoring
+- ❌ Outdoor deployment (needs power outlet)
+
+**Perfect for:**
+- 🏠 Indoor weather monitoring
+- 🧪 Prototyping and testing
+- 🎓 Learning and experimentation
+- 💻 Development
+
+### Bill of Materials (Minimal)
+
+| Item | Cost | Where to Buy |
+|------|------|--------------|
+| Raspberry Pi Pico W | $6 | Adafruit, Amazon, Pimoroni |
+| BME280 Module | $8-15 | Amazon, eBay, AliExpress |
+| USB Cable | $3 | Any micro-USB cable |
+| Jumper Wires (4) | $2 | Any electronics store |
+| **Total** | **~$20** | |
+
+## ⚡ Section 5: Complete Solar-Powered System
+
+Full outdoor deployment with continuous operation!
+
+```
+                        Complete Weather Station
+                        
+    ┌──────────────┐         ┌──────────────┐
+    │ Solar Panel  │         │   BME280     │
+    │  6V, 10W     │         │   Sensor     │
+    └──────┬───────┘         └──────┬───────┘
+           │                        │ (I2C)
+           │                        │
+           ▼                        ▼
+    ┌──────────────────────────────────────────┐
+    │         Charge Controller                │
+    │             (TP4056)                      │
+    │                                          │
+    │    Battery: 18650 Li-ion 3.7V 3000mAh   │
+    │                                          │
+    └──────────────┬───────────────────────────┘
+                   │
+                   │ 3.7-4.2V
+                   │
+                   ▼
+    ┌──────────────────────────────────────────┐
+    │      Voltage Regulator                   │
+    │      (5V Buck-Boost)                     │
+    └──────────────┬───────────────────────────┘
+                   │
+                   │ 5V regulated
+                   ▼
+    ┌──────────────────────────────────────────┐
+    │                                          │
+    │        RASPBERRY PI PICO W               │
+    │                                          │
+    │  [BME280 on I2C]  [Battery Monitor ADC]  │
+    │                                          │
+    │            [WiFi Module]                 │
+    │                                          │
+    │      Sends to: ThingSpeak / MQTT        │
+    │                                          │
+    └──────────────────────────────────────────┘
+```
+
+### Solar System Features
+
+**Advantages:**
+- ✅ Continuous operation (no recharging)
+- ✅ True outdoor deployment
+- ✅ Battery backup for night/clouds
+- ✅ Battery monitoring and protection
+- ✅ Fully autonomous
+
+**Power Budget:**
+- ☀️ Solar input: 6V × 1.5A = 9W (peak sun)
+- 🔋 Battery: 3.7V × 3000mAh = 11.1Wh
+- 💻 Pico consumption: 50-100mAh per day
+- 📊 Result: 30+ days battery backup, infinite with sun
+
+### Bill of Materials (Solar)
+
+| Item | Qty | Cost | Notes |
+|------|-----|------|-------|
+| Raspberry Pi Pico W | 1 | $6 | WiFi microcontroller |
+| BME280 Module | 1 | $8-15 | I2C sensor |
+| Solar Panel 6V 10W | 1 | $10-20 | Weatherproof |
+| 18650 Battery 3000mAh | 1 | $5-10 | Protected cell |
+| TP4056 Charge Controller | 1 | $3-5 | With load sharing |
+| 5V Buck-Boost Regulator | 1 | $3-8 | Pololu or similar |
+| 10kΩ Resistors (2) | 2 | $0.20 | 1% tolerance |
+| Weatherproof Enclosure | 1 | $10-20 | IP65+ rated |
+| Jumper Wires | 10 | $2 | Various lengths |
+| USB Cable | 1 | $3 | For programming |
+| **Total** | | **~$50-80** | |
+
+## 📦 Physical Layout Recommendations
+
+### Indoor Breadboard Setup
+
+```
+    Breadboard Layout (Top View):
+    
+    [Power Rails]     [Pico W]           [BME280]
+    ─────────────    ───────────        ──────────
+    + (Red)  ────────→ 3.3V Pin         ← VCC
+    - (Black)────────→ GND Pin          ← GND
+                      GP0 ──────────────→ SDA
+                      GP1 ──────────────→ SCL
+                      
+    Easy to modify and test!
+```
+
+### Outdoor Enclosure Layout
+
+```
+    Side View of Weatherproof Enclosure:
+    
+         ┌─────────────────────────────────┐
+         │  ☀️ Solar Panel (on lid)        │
+         └─────────────────────────────────┘
+         ┌─────────────────────────────────┐
+         │ ┌─────────────────────────────┐ │
+         │ │ Ventilated Section (top)    │ │
+         │ │  🌡️ BME280 Sensor           │ │ ← Airflow
+         │ └─────────────────────────────┘ │
+         ├─────────────────────────────────┤
+         │  Main Electronics Bay:          │
+         │                                 │
+         │  ┌──────────┐  [Charge         │
+         │  │          │   Controller]     │
+         │  │ Pico W   │                   │
+         │  │          │  [Voltage Reg]    │
+         │  └──────────┘                   │
+         │                                 │
+         │  🔋 [Battery]    💡[LED]        │
+         └─────────────────────────────────┘
+              │                 │
+         [Cable Gland]    [Cable Gland]
+```
+
+### Component Placement Tips
+
+1. **BME280 Sensor:**
+   - Place in ventilated area
+   - Shield from direct sunlight
+   - Keep away from electronics heat
+   - Use radiation shield if possible
+
+2. **Solar Panel:**
+   - Mount on top of enclosure
+   - Angle toward sun (latitude angle)
+   - Clear of obstructions
+   - Secure against wind
+
+3. **Battery:**
+   - Inside main compartment
+   - Protected from elements
+   - Easy to access for replacement
+   - Away from heat sources
+
+4. **Electronics:**
+   - Central location in enclosure
+   - Away from moisture entry points
+   - Secure with standoffs or foam
+   - Cable management for neatness
+
+## ✅ Testing Checklist
+
+### Pre-Assembly Tests
+
+- [ ] Test BME280 on breadboard first
+- [ ] Verify I2C address (0x76 or 0x77)
+- [ ] Measure resistor values with multimeter
+- [ ] Check battery voltage (should be 3.7-4.2V)
+- [ ] Test solar panel output (should be 5-7V in sun)
+- [ ] Verify voltage regulator output (should be 5.0V ±0.1V)
+
+### Assembly Tests
+
+- [ ] Measure voltage at each test point:
+  - BME280 VCC: 3.3V
+  - Battery: 3.7-4.2V
+  - Regulator output: 5.0V
+  - GP27 (battery monitor): 1.8-2.1V
+  
+- [ ] Test I2C communication:
+  ```python
+  from machine import I2C, Pin
+  i2c = I2C(0, sda=Pin(0), scl=Pin(1))
+  print(i2c.scan())  # Should show [118] or [119]
+  ```
+
+- [ ] Test battery voltage reading:
+  ```python
+  from power import PowerManager
+  pm = PowerManager()
+  print(f"Battery: {pm.read_battery_voltage():.2f}V")
+  ```
+
+- [ ] Test WiFi connection:
+  ```python
+  from wifi_manager import WiFiManager
+  wm = WiFiManager()
+  wm.connect()
+  print(wm.get_connection_info())
+  ```
+
+### Post-Assembly Tests
+
+- [ ] Run full diagnostics:
+  ```python
+  from main import WeatherStation
+  station = WeatherStation()
+  station.run_diagnostics()
+  ```
+
+- [ ] Verify data transmission to ThingSpeak
+- [ ] Check battery charging from solar
+- [ ] Test low-power sleep mode
+- [ ] Verify readings are reasonable
+- [ ] Leave running for 24 hours as burn-in test
+
+## ⚠️ Common Wiring Mistakes
+
+### ❌ Wrong Connections
+
+| Mistake | Problem | Solution |
+|---------|---------|----------|
+| **5V to BME280** | Damages sensor! | Use 3.3V only |
+| **SDA ↔ SCL swapped** | I2C won't work | Check color coding |
+| **No common ground** | Unreliable readings | Connect all GNDs together |
+| **Reversed battery polarity** | Damages electronics | Use protected battery |
+| **LED wrong polarity** | LED won't light | Long leg = positive |
+| **Voltage divider > 3.3V** | Damages ADC | Use 2:1 ratio or less |
+
+### ❌ Wiring Problems
+
+**Problem:** I2C not detected
+```
+Symptoms: i2c.scan() returns []
+Causes:
+  • Loose wire connection
+  • SDA/SCL swapped
+  • No power to BME280
+  • Wrong I2C address in code
+Fix: Check each connection with multimeter
+```
+
+**Problem:** Battery voltage reads incorrectly
+```
+Symptoms: Voltage too high/low or unstable
+Causes:
+  • Wrong resistor values
+  • Loose connection
+  • No voltage divider
+  • Shorted resistor
+Fix: Re-measure resistors, check continuity
+```
+
+**Problem:** System resets randomly
+```
+Symptoms: Unpredictable crashes
+Causes:
+  • Insufficient power supply
+  • Voltage drops during WiFi
+  • Loose power connections
+Fix: Use proper voltage regulator, check solder joints
+```
+
+## 📐 Wire Management Best Practices
+
+1. **Use appropriate wire gauge:**
+   - Power wires: 22-24 AWG
+   - Signal wires: 24-28 AWG
+
+2. **Keep wires organized:**
+   - Bundle with zip ties
+   - Use heat shrink for connections
+   - Label wires at both ends
+
+3. **Strain relief:**
+   - Don't pull on solder joints
+   - Use cable glands in enclosure
+   - Secure wires with hot glue
+
+4. **Length considerations:**
+   - Keep I2C wires < 1 meter
+   - Minimize power wire length
+   - Coil excess wire neatly
+
+## 🔌 Connector Recommendations
+
+| Connection | Recommended Connector | Alternative |
+|------------|----------------------|-------------|
+| BME280 | Female-to-male jumpers | 4-pin JST |
+| Battery | JST-PH 2.0mm | Screw terminal |
+| Solar Panel | MC4 connectors | Barrel jack |
+| Power wires | Screw terminals | Solder + heat shrink |
+
+## 📦 Enclosure Requirements
+
+### Specifications
+
+| Requirement | Value | Notes |
+|------------|-------|-------|
+| IP Rating | IP65 minimum | Dust/water resistant |
+| Material | ABS or Polycarbonate | UV-resistant |
+| Size | 100mm × 100mm × 50mm minimum | Room for components |
+| Temperature | -20°C to +60°C | Operating range |
+| Ventilation | Required | For BME280 accuracy |
+| Cable Glands | PG7 or PG9 | Waterproof entry |
+
+### Recommended Enclosures
+
+- **Indoor:** Any plastic project box
+- **Outdoor:** IP65+ NEMA enclosure
+- **DIY:** 3D printed with gaskets
+- **Pro:** Stevenson screen (for accuracy)
+
+## 🛠️ Tools Required
+
+### Essential Tools
+
+- 🔧 Soldering iron (if needed)
+- 📏 Wire strippers
+- ✂️ Wire cutters  
+- 🔍 Multimeter (crucial!)
+- 🔩 Small screwdrivers
+- 📐 Helping hands/vice
+
+### Recommended Tools
+
+- 🔥 Heat gun (for heat shrink)
+- 🔌 Continuity tester
+- 📊 Oscilloscope (for debugging)
+- 🔨 Drill (for enclosure)
+- 🎨 Label maker
+
+## 📖 Additional Resources
+
+**Pinout Diagrams:**
+- [Raspberry Pi Pico W Pinout](https://datasheets.raspberrypi.com/picow/PicoW-A4-Pinout.pdf)
+
+**Datasheets:**
+- [BME280 Datasheet](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme280-ds002.pdf)
+- [TP4056 Datasheet](https://dlnmh9ip6v2uc.cloudfront.net/datasheets/Prototyping/TP4056.pdf)
+
+**Tutorials:**
+- [I2C Communication Guide](https://learn.sparkfun.com/tutorials/i2c)
+- [Li-ion Battery Safety](https://learn.sparkfun.com/tutorials/battery-technologies)
+
+---
+
+## 🎓 Next Steps
+
+1. ✅ **Start Simple:** Begin with Section 4 (minimal setup)
+2. ✅ **Test Everything:** Use the testing checklist
+3. ✅ **Add Power:** Progress to Section 5 (solar) when ready
+4. ✅ **Deploy Outdoors:** Install in weatherproof enclosure
+5. ✅ **Monitor & Tune:** Calibrate and optimize
+
+**Good luck with your build!** 🚀
+
+---
+
+**Questions?** Check the main [README.md](README.md) or [QUICKSTART.md](QUICKSTART.md)
+
+**Ready to start?** Download all files and begin with the [Quick Start Guide](QUICKSTART.md)!
